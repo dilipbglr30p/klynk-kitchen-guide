@@ -4,86 +4,83 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Card, CardContent } from "@/components/ui/card";
 import { useNavigate, useParams } from "react-router-dom";
+import { supabase } from "@/integrations/supabase/client";
 
-interface CookingStep {
+interface Step {
   id: number;
+  step_number: number;
   instruction: string;
-  timerSeconds?: number;
-  image?: string;
-  tips?: string[];
+  duration: number;
 }
 
-const cookingSteps: CookingStep[] = [
-  {
-    id: 1,
-    instruction: "Pre-heat the pan on medium heat for 1 minute",
-    timerSeconds: 60,
-    tips: ["Make sure the pan is completely dry", "Medium heat is key - not too high"]
-  },
-  {
-    id: 2,
-    instruction: "Add oil, mustard seeds and cumin. Let them splutter for 30 seconds",
-    timerSeconds: 30,
-    tips: ["Wait for the seeds to crackle", "This releases the flavors"]
-  },
-  {
-    id: 3,
-    instruction: "Add curry leaves and green chili. Sauté for 10 seconds",
-    timerSeconds: 10,
-    tips: ["Be careful of spluttering", "Curry leaves will become crispy"]
-  },
-  {
-    id: 4,
-    instruction: "Add chopped tomatoes and cook until soft, about 2-3 minutes",
-    timerSeconds: 180,
-    tips: ["Tomatoes should become mushy", "Stir occasionally to prevent sticking"]
-  },
-  {
-    id: 5,
-    instruction: "Add rasam powder, turmeric, and salt. Mix well",
-    timerSeconds: 0,
-    tips: ["Ensure spices are evenly distributed", "The mixture should be aromatic"]
-  },
-  {
-    id: 6,
-    instruction: "Add the cooked rice and mix gently to combine all ingredients",
-    timerSeconds: 0,
-    tips: ["Be gentle to avoid breaking rice grains", "Mix until evenly coated"]
-  },
-  {
-    id: 7,
-    instruction: "Cook for 2-3 minutes, stirring occasionally",
-    timerSeconds: 150,
-    tips: ["Rice should absorb the flavors", "Don't overcook to maintain texture"]
-  },
-  {
-    id: 8,
-    instruction: "Garnish with fresh coriander leaves and serve hot",
-    timerSeconds: 0,
-    tips: ["Serve immediately for best taste", "Pair with pickle or yogurt"]
-  }
-];
+interface Recipe {
+  title: string;
+}
 
 const GuidedCooking = () => {
   const navigate = useNavigate();
   const { id } = useParams();
+  const [recipe, setRecipe] = useState<Recipe | null>(null);
+  const [steps, setSteps] = useState<Step[]>([]);
+  const [loading, setLoading] = useState(true);
   const [currentStep, setCurrentStep] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
   const [timerActive, setTimerActive] = useState(false);
 
-  const step = cookingSteps[currentStep];
-  const progress = ((currentStep + 1) / cookingSteps.length) * 100;
+  useEffect(() => {
+    const fetchRecipeAndSteps = async () => {
+      if (!id) return;
+      
+      try {
+        setLoading(true);
+        
+        // Fetch recipe
+        const { data: recipeData, error: recipeError } = await supabase
+          .from('recipes')
+          .select('title')
+          .eq('id', id)
+          .single();
+
+        if (recipeError) throw recipeError;
+
+        // Fetch recipe steps
+        const { data: stepsData, error: stepsError } = await supabase
+          .from('recipe_steps')
+          .select('*')
+          .eq('recipe_id', id)
+          .order('step_number');
+
+        if (stepsError) throw stepsError;
+
+        setRecipe(recipeData);
+        setSteps(stepsData || []);
+        
+        if (stepsData && stepsData.length > 0) {
+          setTimeRemaining(stepsData[0].duration);
+        }
+      } catch (error) {
+        console.error('Error fetching recipe steps:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchRecipeAndSteps();
+  }, [id]);
+
+  const step = steps[currentStep];
+  const progress = steps.length > 0 ? ((currentStep + 1) / steps.length) * 100 : 0;
 
   // Timer logic
   useEffect(() => {
-    if (step.timerSeconds) {
-      setTimeRemaining(step.timerSeconds);
+    if (step?.duration) {
+      setTimeRemaining(step.duration);
     } else {
       setTimeRemaining(null);
     }
     setTimerActive(false);
-  }, [currentStep, step.timerSeconds]);
+  }, [currentStep, step?.duration]);
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -96,7 +93,7 @@ const GuidedCooking = () => {
           } else {
             setTimerActive(false);
             // Auto-advance to next step when timer completes
-            if (currentStep < cookingSteps.length - 1) {
+            if (currentStep < steps.length - 1) {
               setTimeout(() => setCurrentStep(prev => prev + 1), 1000);
             }
             return 0;
@@ -106,7 +103,7 @@ const GuidedCooking = () => {
     }
 
     return () => clearInterval(interval);
-  }, [timerActive, timeRemaining, currentStep]);
+  }, [timerActive, timeRemaining, currentStep, steps.length]);
 
   const formatTime = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
@@ -121,21 +118,21 @@ const GuidedCooking = () => {
   };
 
   const handleNextStep = () => {
-    if (currentStep < cookingSteps.length - 1) {
+    if (currentStep < steps.length - 1) {
       setCurrentStep(currentStep + 1);
     }
   };
 
   const handlePlayPause = () => {
-    if (step.timerSeconds && timeRemaining) {
+    if (step?.duration && timeRemaining) {
       setTimerActive(!timerActive);
     }
     setIsPlaying(!isPlaying);
   };
 
   const handleResetTimer = () => {
-    if (step.timerSeconds) {
-      setTimeRemaining(step.timerSeconds);
+    if (step?.duration) {
+      setTimeRemaining(step.duration);
       setTimerActive(false);
     }
   };
@@ -150,6 +147,29 @@ const GuidedCooking = () => {
     }
   };
 
+  if (loading) {
+    return (
+      <div className="max-w-2xl mx-auto min-h-screen bg-background">
+        <div className="text-center py-12">
+          <p className="text-muted-foreground">Loading guided cooking...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!recipe || steps.length === 0) {
+    return (
+      <div className="max-w-2xl mx-auto min-h-screen bg-background">
+        <div className="text-center py-12">
+          <p className="text-muted-foreground">No cooking steps found for this recipe.</p>
+          <Button onClick={() => navigate(`/recipe/${id}`)} className="mt-4">
+            Back to Recipe
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-2xl mx-auto min-h-screen bg-background">
       {/* Header */}
@@ -160,7 +180,7 @@ const GuidedCooking = () => {
           </Button>
           <div className="text-center">
             <div className="text-sm font-medium">{currentStep + 1}</div>
-            <div className="text-xs text-muted-foreground">{cookingSteps.length}</div>
+            <div className="text-xs text-muted-foreground">{steps.length}</div>
           </div>
           <div className="flex items-center gap-2">
             <div className="text-sm font-medium">{Math.round(progress)}%</div>
@@ -185,7 +205,7 @@ const GuidedCooking = () => {
             </h2>
 
             {/* Timer Section */}
-            {step.timerSeconds && timeRemaining !== null && (
+            {step.duration > 0 && timeRemaining !== null && (
               <div className="mb-6">
                 <div className="bg-gradient-to-r from-timer-active/20 to-primary/20 rounded-xl p-6 text-center">
                   <div className="text-4xl font-bold mb-2 gradient-timer bg-clip-text text-transparent">
@@ -214,21 +234,6 @@ const GuidedCooking = () => {
                 </div>
               </div>
             )}
-
-            {/* Tips */}
-            {step.tips && step.tips.length > 0 && (
-              <div className="bg-accent/50 rounded-lg p-4">
-                <h4 className="font-medium mb-2 text-sm">💡 Tips:</h4>
-                <ul className="space-y-1 text-sm text-muted-foreground">
-                  {step.tips.map((tip, index) => (
-                    <li key={index} className="flex items-start gap-2">
-                      <span className="text-primary mt-1">•</span>
-                      <span>{tip}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
           </CardContent>
         </Card>
 
@@ -254,7 +259,7 @@ const GuidedCooking = () => {
           
           <Button
             onClick={handleNextStep}
-            disabled={currentStep === cookingSteps.length - 1}
+            disabled={currentStep === steps.length - 1}
             className="h-12 gradient-hero text-primary-foreground"
           >
             Next
@@ -263,8 +268,8 @@ const GuidedCooking = () => {
         </div>
 
         {/* Step Indicators */}
-        <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${cookingSteps.length}, 1fr)` }}>
-          {cookingSteps.map((_, index) => (
+        <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${steps.length}, 1fr)` }}>
+          {steps.map((_, index) => (
             <div
               key={index}
               className={`h-2 rounded-full transition-colors ${
@@ -278,7 +283,7 @@ const GuidedCooking = () => {
       </div>
 
       {/* Bottom Action */}
-      {currentStep === cookingSteps.length - 1 && (
+      {currentStep === steps.length - 1 && (
         <div className="fixed bottom-4 left-4 right-4 max-w-2xl mx-auto">
           <Button className="w-full h-12 gradient-hero text-primary-foreground font-medium">
             🎉 Recipe Complete! Rate Your Cooking

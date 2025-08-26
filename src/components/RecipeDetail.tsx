@@ -1,13 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ArrowLeft, Clock, Users, Heart, Play, ChefHat } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
 import { useNavigate, useParams } from "react-router-dom";
+import { supabase } from "@/integrations/supabase/client";
 import IngredientsList from "./IngredientsList";
 import ServingsSelector from "./ServingsSelector";
-import masalaPeanutsImage from "@/assets/masala-peanuts.jpg";
 
 interface Ingredient {
   id: number;
@@ -19,42 +18,119 @@ interface Ingredient {
   icon?: string;
 }
 
-const sampleIngredients: Ingredient[] = [
-  { id: 1, name: "Rasam Powder", quantity: 1, unit: "tbsp", group_type: "COLLECT", icon: "🌶️" },
-  { id: 2, name: "Curry Leaves", quantity: 1, unit: "sprig", group_type: "COLLECT", icon: "🌿" },
-  { id: 3, name: "Red Chilli Powder", quantity: 1, unit: "tsp", group_type: "COLLECT", icon: "🌶️" },
-  { id: 4, name: "Green Chilli", quantity: 1, unit: "piece", group_type: "PREP", note: "Slit lengthwise", icon: "🌶️" },
-  { id: 5, name: "Rice", quantity: 2, unit: "cup", group_type: "PREP", note: "Cooked", icon: "🍚" },
-  { id: 6, name: "Coriander Leaves", quantity: 1, unit: "tbsp", group_type: "COLLECT", icon: "🌿" },
-  { id: 7, name: "Chilli Oil", quantity: 1, unit: "tbsp", group_type: "COLLECT", icon: "🫗" },
-  { id: 8, name: "Cumin Seed", quantity: 1, unit: "tsp", group_type: "COLLECT", icon: "🟫" },
-  { id: 9, name: "Turmeric Powder", quantity: 0.5, unit: "tsp", group_type: "COLLECT", icon: "🟡" },
-  { id: 10, name: "Salt", quantity: 0.5, unit: "tsp", group_type: "COLLECT", icon: "🧂" },
-  { id: 11, name: "Tomato", quantity: 1, unit: "large", group_type: "PREP", note: "Finely chopped", icon: "🍅" },
-  { id: 12, name: "Mustard Seeds", quantity: 1, unit: "tsp", group_type: "COLLECT", icon: "⚫" }
-];
+interface Recipe {
+  id: string;
+  title: string;
+  description: string;
+  cooking_time: number;
+  servings: number;
+  difficulty: string;
+  calories: number;
+  image: string;
+  tags: string[];
+}
 
 const RecipeDetail = () => {
   const navigate = useNavigate();
   const { id } = useParams();
+  const [recipe, setRecipe] = useState<Recipe | null>(null);
+  const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [servings, setServings] = useState(4);
   const [isFavorite, setIsFavorite] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchRecipe = async () => {
+      if (!id) return;
+      
+      try {
+        setLoading(true);
+        
+        // Fetch recipe
+        const { data: recipeData, error: recipeError } = await supabase
+          .from('recipes')
+          .select('*')
+          .eq('id', id)
+          .single();
+
+        if (recipeError) throw recipeError;
+
+        // Fetch recipe tags
+        const { data: tagsData, error: tagsError } = await supabase
+          .from('recipe_tags')
+          .select('tag')
+          .eq('recipe_id', id);
+
+        if (tagsError) throw tagsError;
+
+        // Fetch recipe ingredients with ingredient names
+        const { data: ingredientsData, error: ingredientsError } = await supabase
+          .from('recipe_ingredients')
+          .select(`
+            id,
+            quantity,
+            unit,
+            group_type,
+            note,
+            icon,
+            ingredients (name)
+          `)
+          .eq('recipe_id', id);
+
+        if (ingredientsError) throw ingredientsError;
+
+        const formattedIngredients = ingredientsData?.map(item => ({
+          id: item.id,
+          name: (item.ingredients as any)?.name || '',
+          quantity: Number(item.quantity),
+          unit: item.unit || '',
+          group_type: item.group_type as 'PREP' | 'COLLECT',
+          note: item.note,
+          icon: item.icon
+        })) || [];
+
+        setRecipe({
+          ...recipeData,
+          tags: tagsData?.map(t => t.tag) || []
+        });
+        setIngredients(formattedIngredients);
+        setServings(recipeData.servings);
+      } catch (error) {
+        console.error('Error fetching recipe:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchRecipe();
+  }, [id]);
 
   const handleStartGuided = () => {
     navigate(`/recipe/${id}/guided`);
   };
-  
-  const recipe = {
-    id: "1",
-    title: "Masala Peanuts",
-    description: "Crunchy spiced peanuts perfect for snacking with South Indian flavors",
-    cookingTime: 20,
-    baseServings: 4,
-    difficulty: "Semi" as const,
-    calories: 478,
-    image: masalaPeanutsImage,
-    tags: ["Vegan", "Indian", "South Indian", "Chaat"]
-  };
+
+  if (loading) {
+    return (
+      <div className="max-w-2xl mx-auto">
+        <div className="text-center py-12">
+          <p className="text-muted-foreground">Loading recipe...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!recipe) {
+    return (
+      <div className="max-w-2xl mx-auto">
+        <div className="text-center py-12">
+          <p className="text-muted-foreground">Recipe not found.</p>
+          <Button onClick={() => navigate('/')} className="mt-4">
+            Back to Home
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -100,7 +176,7 @@ const RecipeDetail = () => {
             </div>
             <div className="flex items-center gap-1">
               <Clock className="w-4 h-4" />
-              <span>{recipe.cookingTime} m</span>
+              <span>{recipe.cooking_time} m</span>
             </div>
             <div className="flex items-center gap-1">
               <span className="font-medium">{recipe.calories} kcal</span>
@@ -142,8 +218,8 @@ const RecipeDetail = () => {
         </CardHeader>
         <CardContent>
           <IngredientsList 
-            ingredients={sampleIngredients}
-            baseServings={recipe.baseServings}
+            ingredients={ingredients}
+            baseServings={recipe.servings}
             currentServings={servings}
           />
         </CardContent>

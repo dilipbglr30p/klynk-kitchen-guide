@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { supabase } from "@/integrations/supabase/client";
 import RecipeCard from "./RecipeCard";
 
 interface Recipe {
   id: string;
   title: string;
   description: string;
-  cookingTime: number;
+  cooking_time: number;
   servings: number;
   difficulty: 'Easy' | 'Semi' | 'Hard';
   category: string;
@@ -23,114 +24,61 @@ interface RecipeGridProps {
   };
 }
 
-// Sample recipe data inspired by the images
-const sampleRecipes: Recipe[] = [
-  {
-    id: "1",
-    title: "Masala Peanuts",
-    description: "Crunchy spiced peanuts perfect for snacking",
-    cookingTime: 1,
-    servings: 4,
-    difficulty: "Easy",
-    category: "Snacks",
-    tags: ["Vegan", "Indian", "Chaat"],
-    image: "/api/placeholder/300/200",
-    calories: 150
-  },
-  {
-    id: "2", 
-    title: "Thai Peanut Salad",
-    description: "Fresh and zesty Thai-style peanut salad",
-    cookingTime: 4,
-    servings: 2,
-    difficulty: "Easy",
-    category: "Healthy",
-    tags: ["Veg", "Thai"],
-    image: "/api/placeholder/300/200",
-    calories: 280
-  },
-  {
-    id: "3",
-    title: "Peanut Mushroom Spread",
-    description: "Creamy mushroom and peanut spread",
-    cookingTime: 16,
-    servings: 4,
-    difficulty: "Semi",
-    category: "Snacks",
-    tags: ["Vegan", "Fusion"],
-    image: "/api/placeholder/300/200",
-    calories: 220
-  },
-  {
-    id: "4",
-    title: "Tomato Peanut Chutney",
-    description: "South Indian style tomato peanut chutney",
-    cookingTime: 22,
-    servings: 6,
-    difficulty: "Semi",
-    category: "South Indian",
-    tags: ["Vegan", "Indian", "South Indian", "Andhra"],
-    image: "/api/placeholder/300/200",
-    calories: 180
-  },
-  {
-    id: "5",
-    title: "Wai Wai Bhel",
-    description: "Street food style bhel with instant noodles",
-    cookingTime: 1,
-    servings: 2,
-    difficulty: "Easy",
-    category: "Snacks",
-    tags: ["Vegan", "Street food"],
-    image: "/api/placeholder/300/200",
-    calories: 320
-  },
-  {
-    id: "6",
-    title: "Bhel Puri",
-    description: "Classic Mumbai street food snack",
-    cookingTime: 1,
-    servings: 2,
-    difficulty: "Easy",
-    category: "Snacks",
-    tags: ["Vegan", "Indian", "Chaat"],
-    image: "/api/placeholder/300/200",
-    calories: 250
-  },
-  {
-    id: "7",
-    title: "Masala Papad Taco",
-    description: "Fusion taco with Indian flavors",
-    cookingTime: 1,
-    servings: 1,
-    difficulty: "Easy",
-    category: "Snacks",
-    tags: ["Vegan", "Mexican"],
-    image: "/api/placeholder/300/200",
-    calories: 180
-  },
-  {
-    id: "8",
-    title: "Bruschetta",
-    description: "Italian style toasted bread with toppings",
-    cookingTime: 6,
-    servings: 4,
-    difficulty: "Easy",
-    category: "Snacks",
-    tags: ["Vegan", "Italian"],
-    image: "/api/placeholder/300/200",
-    calories: 160
-  }
-];
-
 const RecipeGrid = ({ searchQuery, filters }: RecipeGridProps) => {
-  const [recipes] = useState<Recipe[]>(sampleRecipes);
+  const [recipes, setRecipes] = useState<Recipe[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchRecipes = async () => {
+      try {
+        setLoading(true);
+        
+        // Fetch recipes with tags
+        const { data: recipesData, error: recipesError } = await supabase
+          .from('recipes')
+          .select('id, title, description, cooking_time, servings, difficulty, category, image, calories');
+
+        if (recipesError) throw recipesError;
+
+        // Fetch tags for all recipes
+        const { data: tagsData, error: tagsError } = await supabase
+          .from('recipe_tags')
+          .select('recipe_id, tag');
+
+        if (tagsError) throw tagsError;
+
+        // Group tags by recipe_id
+        const tagsByRecipe: { [key: string]: string[] } = {};
+        tagsData?.forEach(tag => {
+          if (!tagsByRecipe[tag.recipe_id]) {
+            tagsByRecipe[tag.recipe_id] = [];
+          }
+          tagsByRecipe[tag.recipe_id].push(tag.tag);
+        });
+
+        // Combine recipes with their tags
+        const recipesWithTags = recipesData?.map(recipe => ({
+          ...recipe,
+          tags: tagsByRecipe[recipe.id] || [],
+          difficulty: recipe.difficulty as 'Easy' | 'Semi' | 'Hard'
+        })) || [];
+
+        setRecipes(recipesWithTags);
+      } catch (error) {
+        console.error('Error fetching recipes:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchRecipes();
+  }, []);
 
   // Filter recipes based on search and filters
   const filteredRecipes = recipes.filter(recipe => {
     // Search query filter
     if (searchQuery && !recipe.title.toLowerCase().includes(searchQuery.toLowerCase()) &&
-        !recipe.description.toLowerCase().includes(searchQuery.toLowerCase()) &&
+        !recipe.description?.toLowerCase().includes(searchQuery.toLowerCase()) &&
         !recipe.tags.some(tag => tag.toLowerCase().includes(searchQuery.toLowerCase()))) {
       return false;
     }
@@ -142,6 +90,14 @@ const RecipeGrid = ({ searchQuery, filters }: RecipeGridProps) => {
 
     return true;
   });
+
+  if (loading) {
+    return (
+      <div className="text-center py-12">
+        <p className="text-muted-foreground">Loading recipes...</p>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -155,7 +111,10 @@ const RecipeGrid = ({ searchQuery, filters }: RecipeGridProps) => {
       {/* Recipe Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
         {filteredRecipes.map((recipe) => (
-          <RecipeCard key={recipe.id} recipe={recipe} />
+          <RecipeCard key={recipe.id} recipe={{
+            ...recipe,
+            cookingTime: recipe.cooking_time
+          }} />
         ))}
       </div>
 
